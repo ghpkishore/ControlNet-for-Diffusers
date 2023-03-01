@@ -181,6 +181,7 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
         tokenizer: CLIPTokenizer,
         unet: UNet2DConditionModel,
         controlnet: UNet2DConditionModel,
+        controlnet2:UNet2DConditionModel,
         scheduler: KarrasDiffusionSchedulers,
         safety_checker: StableDiffusionSafetyChecker,
         feature_extractor: CLIPFeatureExtractor,
@@ -194,6 +195,7 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
             tokenizer=tokenizer,
             unet=unet,
             controlnet=controlnet,
+            controlnet2=controlnet2,
             scheduler=scheduler,
             safety_checker=safety_checker,
             feature_extractor=feature_extractor,
@@ -627,9 +629,12 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
         callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
         callback_steps: Optional[int] = 1,
         cross_attention_kwargs: Optional[Dict[str, Any]] = None,
-        controlnet_hint: Optional[Union[torch.FloatTensor, np.ndarray, PIL.Image.Image]] = None,
+        controlnet_hint1: Optional[Union[torch.FloatTensor, np.ndarray, PIL.Image.Image]] = None,
+        controlnet_hint2: Optional[Union[torch.FloatTensor, np.ndarray, PIL.Image.Image]] = None,
         image: Union[torch.FloatTensor, PIL.Image.Image] = None,
         mask_image: Union[torch.FloatTensor, PIL.Image.Image] = None,
+        control1_weight: Optional[float] = 1.0,
+        control2_weight: Optional[float] = 1.0,
     ):
         r"""
         Function invoked when calling the pipeline for generation.
@@ -710,8 +715,10 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
         width = width or self.unet.config.sample_size * self.vae_scale_factor
 
         # 1. Control Embedding check & conversion
-        if controlnet_hint is not None:
-            controlnet_hint = self.controlnet_hint_conversion(controlnet_hint, height, width, num_images_per_prompt)
+        if controlnet_hint1 is not None:
+            controlnet_hint1 = self.controlnet_hint_conversion(controlnet_hint1, height, width, num_images_per_prompt)
+        if controlnet_hint2 is not None:
+            controlnet_hint2 = self.controlnet_hint_conversion(controlnet_hint2, height, width, num_images_per_prompt)
 
         # 2. Check inputs. Raise error if not correct
         self.check_inputs(
@@ -788,11 +795,28 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
                 
-                if controlnet_hint is not None:
+                if controlnet_hint1 is not None:
                     # ControlNet predict the noise residual
-                    control = self.controlnet(
-                        latent_model_input, t, encoder_hidden_states=prompt_embeds, controlnet_hint=controlnet_hint
+                    merged_control = []
+
+                    control1 = self.controlnet(
+                        latent_model_input, t, encoder_hidden_states=prompt_embeds, controlnet_hint=controlnet_hint1
                     )
+
+                    if controlnet_hint2 is not None:    
+                        control2 = self.controlnet(
+                            latent_model_input, t, encoder_hidden_states=prompt_embeds, controlnet_hint=controlnet_hint2
+                        )
+
+                        for i in range(len(control1)):
+                            merged_control.append(control1_weight*control1[i]+control2_weight*control2[i])                    
+                        
+                        control = merged_control
+                    
+                    else:
+
+                        control = control1
+
                     control = [item for item in control]
                     latent_model_input = torch.cat([latent_model_input, mask, masked_image_latents], dim=1)
                     noise_pred = self.unet(
