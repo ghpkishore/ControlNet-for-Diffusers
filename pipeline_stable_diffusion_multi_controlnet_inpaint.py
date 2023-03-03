@@ -181,11 +181,15 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
         tokenizer: CLIPTokenizer,
         unet: UNet2DConditionModel,
         controlnet: UNet2DConditionModel,
-        controlnet2:UNet2DConditionModel,
         scheduler: KarrasDiffusionSchedulers,
         safety_checker: StableDiffusionSafetyChecker,
         feature_extractor: CLIPFeatureExtractor,
         requires_safety_checker: bool = False,
+        controlnet2: Optional[UNet2DConditionModel] = None,
+        controlnet3: Optional[UNet2DConditionModel] = None,
+        controlnet4: Optional[UNet2DConditionModel] = None,
+        controlnet5: Optional[UNet2DConditionModel] = None,
+        controlnet6: Optional[UNet2DConditionModel] = None,
     ):
         super().__init__()
 
@@ -199,6 +203,10 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
             scheduler=scheduler,
             safety_checker=safety_checker,
             feature_extractor=feature_extractor,
+            controlnet3=controlnet3,
+            controlnet4=controlnet4,
+            controlnet5=controlnet5,
+            controlnet6=controlnet6,
         )
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.register_to_config(requires_safety_checker=requires_safety_checker)
@@ -556,62 +564,9 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
             raise ValueError(
                 f"Acceptable type of `controlnet_hint` are any of torch.Tensor, np.ndarray, PIL.Image.Image but is {type(controlnet_hint)}"
             )
-    def controlnet_hint_conversion2(self, controlnet_hint2, height, width, num_images_per_prompt):
-        channels = 3
-        if isinstance(controlnet_hint2, torch.Tensor):
-            # torch.Tensor: acceptble shape are any of chw, bchw(b==1) or bchw(b==num_images_per_prompt)
-            shape_chw = (channels, height, width)
-            shape_bchw = (1, channels, height, width)
-            shape_nchw = (num_images_per_prompt, channels, height, width)
-            if controlnet_hint2.shape in [shape_chw, shape_bchw, shape_nchw]:
-                controlnet_hint2 = controlnet_hint2.to(dtype=self.controlnet2.dtype, device=self.controlnet2.device)
-                if controlnet_hint2.shape != shape_nchw:
-                    controlnet_hint2 = controlnet_hint2.repeat(num_images_per_prompt, 1, 1, 1)
-                return controlnet_hint2
-            else:
-                raise ValueError(
-                    f"Acceptble shape of `controlnet_hint` are any of ({channels}, {height}, {width}),"
-                    + f" (1, {channels}, {height}, {width}) or ({num_images_per_prompt}, "
-                    + f"{channels}, {height}, {width}) but is {controlnet_hint2.shape}"
-                )
-        elif isinstance(controlnet_hint2, np.ndarray):
-            # np.ndarray: acceptable shape is any of hw, hwc, bhwc(b==1) or bhwc(b==num_images_per_promot)
-            # hwc is opencv compatible image format. Color channel must be BGR Format.
-            if controlnet_hint2.shape == (height, width):
-                controlnet_hint2 = np.repeat(controlnet_hint2[:, :, np.newaxis], channels, axis=2)  # hw -> hwc(c==3)
-            shape_hwc = (height, width, channels)
-            shape_bhwc = (1, height, width, channels)
-            shape_nhwc = (num_images_per_prompt, height, width, channels)
-            if controlnet_hint2.shape in [shape_hwc, shape_bhwc, shape_nhwc]:
-                controlnet_hint2 = torch.from_numpy(controlnet_hint2.copy())
-                controlnet_hint2 = controlnet_hint2.to(dtype=self.controlnet2.dtype, device=self.controlnet2.device)
-                controlnet_hint2 /= 255.0
-                if controlnet_hint2.shape != shape_nhwc:
-                    controlnet_hint2 = controlnet_hint2.repeat(num_images_per_prompt, 1, 1, 1)
-                controlnet_hint2 = controlnet_hint2.permute(0, 3, 1, 2)  # b h w c -> b c h w
-                return controlnet_hint2
-            else:
-                raise ValueError(
-                    f"Acceptble shape of `controlnet_hint` are any of ({width}, {channels}), "
-                    + f"({height}, {width}, {channels}), "
-                    + f"(1, {height}, {width}, {channels}) or "
-                    + f"({num_images_per_prompt}, {channels}, {height}, {width}) but is {controlnet_hint2.shape}"
-                )
-        elif isinstance(controlnet_hint2, PIL.Image.Image):
-            if controlnet_hint2.size == (width, height):
-                controlnet_hint2 = controlnet_hint2.convert("RGB")  # make sure 3 channel RGB format
-                controlnet_hint2 = np.array(controlnet_hint2)  # to numpy
-                controlnet_hint2 = controlnet_hint2[:, :, ::-1]  # RGB -> BGR
-                return self.controlnet_hint_conversion2(controlnet_hint2, height, width, num_images_per_prompt)
-            else:
-                raise ValueError(
-                    f"Acceptable image size of `controlnet_hint` is ({width}, {height}) but is {controlnet_hint2.size}"
-                )
-        else:
-            raise ValueError(
-                f"Acceptable type of `controlnet_hint` are any of torch.Tensor, np.ndarray, PIL.Image.Image but is {type(controlnet_hint2)}"
-            )
     
+    
+
     def prepare_mask_latents(
         self, mask, masked_image, batch_size, height, width, dtype, device, generator, do_classifier_free_guidance
     ):
@@ -686,10 +641,18 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
         cross_attention_kwargs: Optional[Dict[str, Any]] = None,
         controlnet_hint1: Optional[Union[torch.FloatTensor, np.ndarray, PIL.Image.Image]] = None,
         controlnet_hint2: Optional[Union[torch.FloatTensor, np.ndarray, PIL.Image.Image]] = None,
+        controlnet_hint3: Optional[Union[torch.FloatTensor, np.ndarray, PIL.Image.Image]] = None,
+        controlnet_hint4: Optional[Union[torch.FloatTensor, np.ndarray, PIL.Image.Image]] = None,
+        controlnet_hint5: Optional[Union[torch.FloatTensor, np.ndarray, PIL.Image.Image]] = None,
+        controlnet_hint6: Optional[Union[torch.FloatTensor, np.ndarray, PIL.Image.Image]] = None,
         image: Union[torch.FloatTensor, PIL.Image.Image] = None,
         mask_image: Union[torch.FloatTensor, PIL.Image.Image] = None,
         control1_weight: Optional[float] = 1.0,
         control2_weight: Optional[float] = 1.0,
+        control3_weight: Optional[float] = 1.0,
+        control4_weight: Optional[float] = 1.0,
+        control5_weight: Optional[float] = 1.0,
+        control6_weight: Optional[float] = 1.0,
     ):
         r"""
         Function invoked when calling the pipeline for generation.
@@ -773,7 +736,15 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
         if controlnet_hint1 is not None:
             controlnet_hint1 = self.controlnet_hint_conversion(controlnet_hint1, height, width, num_images_per_prompt)
         if controlnet_hint2 is not None:
-            controlnet_hint2 = self.controlnet_hint_conversion2(controlnet_hint2, height, width, num_images_per_prompt)
+            controlnet_hint2 = self.controlnet_hint_conversion(controlnet_hint2, height, width, num_images_per_prompt)
+        if controlnet_hint3 is not None:
+            controlnet_hint3 = self.controlnet_hint_conversion(controlnet_hint3, height, width, num_images_per_prompt)
+        if controlnet_hint4 is not None:
+            controlnet_hint4 = self.controlnet_hint_conversion(controlnet_hint4, height, width, num_images_per_prompt)
+        if controlnet_hint5 is not None:
+            controlnet_hint5 = self.controlnet_hint_conversion(controlnet_hint5, height, width, num_images_per_prompt)
+        if controlnet_hint6 is not None:
+            controlnet_hint6 = self.controlnet_hint_conversion(controlnet_hint6, height, width, num_images_per_prompt)
 
         # 2. Check inputs. Raise error if not correct
         self.check_inputs(
@@ -849,33 +820,29 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
-                if controlnet_hint1 is not None or controlnet_hint2 is not None:
+                if controlnet_hint1 is not None or controlnet_hint2 is not None or controlnet_hint3 is not None:
 
                     merged_control = []
 
-                    if controlnet_hint1 is not None:
-                        # ControlNet predict the noise residual
-                        control1 = self.controlnet(
-                            latent_model_input, t, encoder_hidden_states=prompt_embeds, controlnet_hint=controlnet_hint1
-                        )
+                    hints = [controlnet_hint1, controlnet_hint2, controlnet_hint3, controlnet_hint4, controlnet_hint5, controlnet_hint6]
 
-                    if controlnet_hint2 is not None:    
-                        control2 = self.controlnet2(
-                            latent_model_input, t, encoder_hidden_states=prompt_embeds, controlnet_hint=controlnet_hint2
-                        )
+                    for i, hint in enumerate(hints):
+                        if hint is not None:
+                            if i == 0:
+                                control_net=getattr(self, "controlnet")
+                            else:
+                                control_net = getattr(self, f"controlnet{i+1}")
+                            control = control_net(
+                                latent_model_input, t, encoder_hidden_states=prompt_embeds, controlnet_hint=hint
+                            )
+                            for j, c in enumerate(control):
+                                if i == 0:
+                                    merged_control.append(control1_weight * c)
+                                else:
+                                    merged_control[j] += control2_weight * c
 
-                    if controlnet_hint1 is not None and controlnet_hint2 is not None:
-                        for i in range(len(control1)):
-                            merged_control.append(control1_weight*control1[i]+control2_weight*control2[i])                                                
-                        control = merged_control
-                        
-                    elif controlnet_hint1 is not None and controlnet_hint2 is None:
-                         control = control1
-
-                    elif controlnet_hint1 is None and controlnet_hint2 is not None:
-                        control = control2
-
-
+                    control = merged_control
+                    
                     control = [item for item in control]
                     latent_model_input = torch.cat([latent_model_input, mask, masked_image_latents], dim=1)
                     noise_pred = self.unet(
