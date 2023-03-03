@@ -43,11 +43,11 @@ If successful, you will get the new model. This model can already be used in Con
 models/control_any3_openpose.pth
  ```
 
-If you want to try with other models, you can just define your own path_sd15_with_control and path_input.
+If you want to try with other models, you can just define your own path_sd15_with_control and path_input. If the path_input is trained with diffusers, you can use [convert_diffusers_to_original_stable_diffusion.py](https://github.com/huggingface/diffusers/blob/eadf0e2555cfa19b033e02de53553f71ac33536f/scripts/convert_diffusers_to_original_stable_diffusion.py#L264) to convert it into safetensors first.
 
 ### (2) The second step is to convert into diffusers
 
-Gratefully, [Takuma Mori](https://github.com/takuma104) has supported it in this recent [PR](https://github.com/huggingface/diffusers/pull/2407), so that we can easily achieve this. As it is still under-devlopement, so it may be unstable, thus we have to use a specific commit version. I will reformat this section once the PR is mergered into diffusers.
+Gratefully, [Takuma Mori](https://github.com/takuma104) has supported it in this recent [PR](https://github.com/huggingface/diffusers/pull/2407), so that we can easily achieve this. As it is still under-devlopement, so it may be unstable, thus we have to use a specific commit version. We notice that diffusers has merged the PR in 3/2/2023, we will reformat our tutorial soon.
 
 ```bash
 git clone https://github.com/takuma104/diffusers.git
