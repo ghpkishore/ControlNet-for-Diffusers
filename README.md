@@ -158,27 +158,252 @@ image.save("inpaint_pos.jpg")
 We have uploaded [pipeline_stable_diffusion_controlnet_inpaint_img2img.py](https://github.com/haofanwang/ControlNet-for-Diffusers/blob/main/pipeline_stable_diffusion_controlnet_inpaint_img2img.py) to support img2img. You can follow the same instruction as [this section](https://github.com/haofanwang/ControlNet-for-Diffusers#controlnet--inpainting).
 
 # Multi-ControlNet (experimental)
-Similar to [T2I-Adapter](https://github.com/TencentARC/T2I-Adapter), ControlNet also supports multiple control images as input. The idea behind is simple, as the base model is frozen, we can combine the outputs from ControlNet1 and ControlNet2, and use it as input to UNet. Here, we provide pseudocode for reference. You need to modify the pipeline as below.
+
+Add two controlNets to the multicontrolnet pipeline.
 
 ```
-control1 = controlnet1(latent_model_input, t, encoder_hidden_states=prompt_embeds, controlnet_hint=controlnet_hint1)
-control2 = controlnet2(latent_model_input, t, encoder_hidden_states=prompt_embeds, controlnet_hint=controlnet_hint2)
+cp pipeline_stable_diffusion_multi_controlnet_inpaint.py  PATH/pipelines/stable_diffusion
+```
+First I copied the unet from inpainting model and replaced the unet of control_sd15_depth model with it and called the new folder control_sd15_depth_inpaint.
 
-# please note that the weights should be adjusted accordingly
-control1_weight = 1.00 # control_any3_openpose
-control2_weight = 0.50 # control_sd15_depth
+Then I updated the current file "pipeline_stable_diffusion_controlnet_inpaint.py" to take in two control inputs and their weights.
 
-merged_control = []
-for i in range(len(control1)):
-    merged_control.append(control1_weight*control[i]+control2_weight*control_1[i])
-control = merged_control
+After that I added controlnet2 to the pipe_control and set weights for the controls. It is now working.
 
-noise_pred = unet(latent_model_input, t, encoder_hidden_states=prompt_embeds, cross_attention_kwargs=cross_attention_kwargs, control=control).sample
+```
+controlnet2_path= "models/control_sd15_scribble"  # 
+controlnet2 = UNet2DConditionModel.from_pretrained(controlnet2_path, subfolder="controlnet").to("cuda")
+pipe_control = StableDiffusionControlNetInpaintPipeline.from_pretrained("models/control_sd15_depth_inpaint",controlnet2=controlnet2,torch_dtype=torch.float16).to('cuda')
+pipe_control.unet.in_channels = 4
+pipe_control.enable_attention_slicing()
+
+output_image  = pipe_control(prompt=prompt, 
+                                negative_prompt="human, hands, fingers, legs, body parts",
+                                image=image,
+                                mask_image=mask,
+                                controlnet_hint1=control_image_1, 
+                                controlnet_hint2=control_image_2, 
+                                control1_weight=1, # Default is 1, you can change this if need be
+                                control2_weight=1, # Default is 1, you can change this if need be
+                                height=height,
+                                width=width,
+                                generator=generator,
+                                num_inference_steps=100).images[0]
+
+
+```
+If you want to add more than 2 control nets into the pipeline, 
+Open the pipeline file and replace:
+
+```
+    def __init__(
+        self,
+        vae: AutoencoderKL,
+        text_encoder: CLIPTextModel,
+        tokenizer: CLIPTokenizer,
+        unet: UNet2DConditionModel,
+        controlnet: UNet2DConditionModel,
+        controlnet2:UNet2DConditionModel,
+        scheduler: KarrasDiffusionSchedulers,
+        safety_checker: StableDiffusionSafetyChecker,
+        feature_extractor: CLIPFeatureExtractor,
+        requires_safety_checker: bool = True,
+    ):
+        super().__init__()
+
+        self.register_modules(
+            vae=vae,
+            text_encoder=text_encoder,
+            tokenizer=tokenizer,
+            unet=unet,
+            controlnet=controlnet,
+            controlnet2=controlnet2,
+            scheduler=scheduler,
+            safety_checker=safety_checker,
+            feature_extractor=feature_extractor,
+        )
 ```
 
-Here is an example of Multi-ControlNet, where we use pose and depth map are control hints. The test images are both credited to [T2I-Adapter](https://github.com/TencentARC/T2I-Adapter).
+With
 
-<img src="https://github.com/haofanwang/ControlNet-for-Diffusers/blob/main/images/person_keypose.png" width="20%" height="20%"> <img src="https://github.com/haofanwang/ControlNet-for-Diffusers/blob/main/images/desk_depth.png" width="20%" height="20%"> <img src="https://github.com/haofanwang/ControlNet-for-Diffusers/blob/main/images/controlnet_test_pose_multi1.jpeg" width="20%" height="20%">
+```
+
+    def __init__(
+        self,
+        vae: AutoencoderKL,
+        text_encoder: CLIPTextModel,
+        tokenizer: CLIPTokenizer,
+        unet: UNet2DConditionModel,
+        controlnet: UNet2DConditionModel,
+        controlnet2:UNet2DConditionModel,
+        controlnet3:UNet2DConditionModel,
+        scheduler: KarrasDiffusionSchedulers,
+        safety_checker: StableDiffusionSafetyChecker,
+        feature_extractor: CLIPFeatureExtractor,
+        requires_safety_checker: bool = True,
+    ):
+        super().__init__()
+
+        self.register_modules(
+            vae=vae,
+            text_encoder=text_encoder,
+            tokenizer=tokenizer,
+            unet=unet,
+            controlnet=controlnet,
+            controlnet2=controlnet2,
+            controlnet3=controlnet3,
+            scheduler=scheduler,
+            safety_checker=safety_checker,
+            feature_extractor=feature_extractor,
+        )
+                
+```
+
+Replace:
+
+```
+def __call__(
+        self,
+        prompt: Union[str, List[str]] = None,
+        height: Optional[int] = None,
+        width: Optional[int] = None,
+        num_inference_steps: int = 50,
+        guidance_scale: float = 7.5,
+        negative_prompt: Optional[Union[str, List[str]]] = None,
+        num_images_per_prompt: Optional[int] = 1,
+        eta: float = 0.0,
+        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
+        latents: Optional[torch.FloatTensor] = None,
+        prompt_embeds: Optional[torch.FloatTensor] = None,
+        negative_prompt_embeds: Optional[torch.FloatTensor] = None,
+        output_type: Optional[str] = "pil",
+        return_dict: bool = True,
+        callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
+        callback_steps: Optional[int] = 1,
+        cross_attention_kwargs: Optional[Dict[str, Any]] = None,
+        controlnet_hint1: Optional[Union[torch.FloatTensor, np.ndarray, PIL.Image.Image]] = None,
+        controlnet_hint2: Optional[Union[torch.FloatTensor, np.ndarray, PIL.Image.Image]] = None,
+        image: Union[torch.FloatTensor, PIL.Image.Image] = None,
+        mask_image: Union[torch.FloatTensor, PIL.Image.Image] = None,
+        control1_weight: Optional[float] = 1.0,
+        control2_weight: Optional[float] = 1.0,
+    ):
+    ```
+    
+    with
+    ```
+    def __call__(
+        self,
+        prompt: Union[str, List[str]] = None,
+        height: Optional[int] = None,
+        width: Optional[int] = None,
+        num_inference_steps: int = 50,
+        guidance_scale: float = 7.5,
+        negative_prompt: Optional[Union[str, List[str]]] = None,
+        num_images_per_prompt: Optional[int] = 1,
+        eta: float = 0.0,
+        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
+        latents: Optional[torch.FloatTensor] = None,
+        prompt_embeds: Optional[torch.FloatTensor] = None,
+        negative_prompt_embeds: Optional[torch.FloatTensor] = None,
+        output_type: Optional[str] = "pil",
+        return_dict: bool = True,
+        callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
+        callback_steps: Optional[int] = 1,
+        cross_attention_kwargs: Optional[Dict[str, Any]] = None,
+        controlnet_hint1: Optional[Union[torch.FloatTensor, np.ndarray, PIL.Image.Image]] = None,
+        controlnet_hint2: Optional[Union[torch.FloatTensor, np.ndarray, PIL.Image.Image]] = None,
+        controlnet_hint3: Optional[Union[torch.FloatTensor, np.ndarray, PIL.Image.Image]] = None,
+        image: Union[torch.FloatTensor, PIL.Image.Image] = None,
+        mask_image: Union[torch.FloatTensor, PIL.Image.Image] = None,
+        control1_weight: Optional[float] = 1.0,
+        control2_weight: Optional[float] = 1.0,
+        control3_weight: Optional[float] = 1.0,
+    ):
+    ```
+    
+Add:
+
+```
+        # 1. Control Embedding check & conversion
+        
+        ...
+        
+        if controlnet_hint3 is not None:
+            controlnet_hint3 = self.controlnet_hint_conversion(controlnet_hint3, height, width, num_images_per_prompt)
+
+And replace:
+
+ ```
+ if controlnet_hint1 is not None:
+                    # ControlNet predict the noise residual
+                    merged_control = []
+
+                    control1 = self.controlnet(
+                        latent_model_input, t, encoder_hidden_states=prompt_embeds, controlnet_hint=controlnet_hint1
+                    )
+
+                    if controlnet_hint2 is not None:    
+                        control2 = self.controlnet(
+                            latent_model_input, t, encoder_hidden_states=prompt_embeds, controlnet_hint=controlnet_hint2
+                        )
+                        
+
+
+                            for i in range(len(control1)):
+                                merged_control.append(control1_weight*control1[i]+control2_weight*control2[i])                    
+
+                            control = merged_control
+
+                    else:
+
+                        control = control1
+```
+
+ with 
+
+```
+      if controlnet_hint1 is not None:
+                    # ControlNet predict the noise residual
+                    merged_control = []
+
+                    control1 = self.controlnet(
+                        latent_model_input, t, encoder_hidden_states=prompt_embeds, controlnet_hint=controlnet_hint1
+                    )
+
+                    if controlnet_hint2 is not None:    
+                        control2 = self.controlnet2(
+                            latent_model_input, t, encoder_hidden_states=prompt_embeds, controlnet_hint=controlnet_hint2
+                        )
+                        
+                       if controlnet_hint3 is not None:    
+                         control3 = self.controlnet3(
+                             latent_model_input, t, encoder_hidden_states=prompt_embeds, controlnet_hint=controlnet_hint3
+                         )
+
+                         for i in range(len(control1)):
+                             merged_control.append(control1_weight*control1[i]+control2_weight*control2[i]+control3_weight*control3[i])                    
+
+                          control = merged_control
+                          
+                        else:
+                        
+                        
+                         for i in range(len(control1)):
+                             merged_control.append(control1_weight*control1[i]+control2_weight*control2[i])                    
+
+                          control = merged_control
+                    
+                    else:
+
+                        control = control1
+                        
+ ```
+ 
+
+ 
+
+
 
 # Acknowledgement
 We first thanks the author of [ControlNet](https://github.com/lllyasviel/ControlNet) for such a great work, our converting code is borrowed from [here](https://github.com/lllyasviel/ControlNet/discussions/12). We are also appreciated the contributions from this [pull request](https://github.com/huggingface/diffusers/pull/2407) in diffusers, so that we can load ControlNet into diffusers.
